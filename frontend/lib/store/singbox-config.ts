@@ -1116,6 +1116,147 @@ const defaultConfig: SingBoxConfig = {
   outbounds: [],
 }
 
+const renameInArray = (values: string[] | undefined, oldTag: string, newTag: string) => {
+  if (!values?.includes(oldTag)) return values
+  return values.map((value) => value === oldTag ? newTag : value)
+}
+
+const renameInboundRouteRules = (rules: RouteRule[] | undefined, oldTag: string, newTag: string): RouteRule[] | undefined => {
+  if (!rules) return rules
+  return rules.map((rule) => {
+    let next = rule
+    const inbound = renameInArray(rule.inbound, oldTag, newTag)
+    if (inbound !== rule.inbound) {
+      next = { ...next, inbound }
+    }
+    if (rule.rules) {
+      next = { ...next, rules: renameInboundRouteRules(rule.rules, oldTag, newTag) }
+    }
+    return next
+  })
+}
+
+const renameInboundDnsRules = (rules: DNSRule[] | undefined, oldTag: string, newTag: string): DNSRule[] | undefined => {
+  if (!rules) return rules
+  return rules.map((rule) => {
+    let next = rule
+    const inbound = renameInArray(rule.inbound, oldTag, newTag)
+    if (inbound !== rule.inbound) {
+      next = { ...next, inbound }
+    }
+    if (rule.rules) {
+      next = { ...next, rules: renameInboundDnsRules(rule.rules, oldTag, newTag) }
+    }
+    return next
+  })
+}
+
+const renameOutboundRouteRules = (rules: RouteRule[] | undefined, oldTag: string, newTag: string): RouteRule[] | undefined => {
+  if (!rules) return rules
+  return rules.map((rule) => {
+    let next = rule
+    if (rule.outbound === oldTag) {
+      next = { ...next, outbound: newTag }
+    }
+    if (rule.rules) {
+      next = { ...next, rules: renameOutboundRouteRules(rule.rules, oldTag, newTag) }
+    }
+    return next
+  })
+}
+
+const renameOutboundReferencesInOutbounds = (outbounds: Outbound[] | undefined, oldTag: string, newTag: string): Outbound[] | undefined => {
+  if (!outbounds) return outbounds
+  return outbounds.map((outbound) => {
+    let next = outbound
+    if (outbound.detour === oldTag) {
+      next = { ...next, detour: newTag }
+    }
+    const outboundsList = renameInArray(outbound.outbounds, oldTag, newTag)
+    if (outboundsList !== outbound.outbounds) {
+      next = { ...next, outbounds: outboundsList }
+    }
+    if (outbound.default === oldTag) {
+      next = { ...next, default: newTag }
+    }
+    return next
+  })
+}
+
+const renameOutboundReferences = (config: SingBoxConfig, oldTag?: string, newTag?: string): SingBoxConfig => {
+  if (!oldTag || !newTag || oldTag === newTag) return config
+
+  const route = config.route ? {
+    ...config.route,
+    rules: renameOutboundRouteRules(config.route.rules, oldTag, newTag),
+    final: config.route.final === oldTag ? newTag : config.route.final,
+  } : config.route
+
+  const dns = config.dns ? {
+    ...config.dns,
+    servers: config.dns.servers?.map((server) =>
+      server.detour === oldTag ? { ...server, detour: newTag } : server
+    ),
+  } : config.dns
+
+  const experimental = config.experimental ? {
+    ...config.experimental,
+    clash_api: config.experimental.clash_api ? {
+      ...config.experimental.clash_api,
+      external_ui_download_detour: config.experimental.clash_api.external_ui_download_detour === oldTag
+        ? newTag
+        : config.experimental.clash_api.external_ui_download_detour,
+    } : config.experimental.clash_api,
+    v2ray_api: config.experimental.v2ray_api ? {
+      ...config.experimental.v2ray_api,
+      stats: config.experimental.v2ray_api.stats ? {
+        ...config.experimental.v2ray_api.stats,
+        outbounds: renameInArray(config.experimental.v2ray_api.stats.outbounds, oldTag, newTag),
+      } : config.experimental.v2ray_api.stats,
+    } : config.experimental.v2ray_api,
+  } : config.experimental
+
+  return {
+    ...config,
+    dns,
+    outbounds: renameOutboundReferencesInOutbounds(config.outbounds, oldTag, newTag),
+    route,
+    experimental,
+  }
+}
+
+const renameInboundReferences = (config: SingBoxConfig, oldTag?: string, newTag?: string): SingBoxConfig => {
+  if (!oldTag || !newTag || oldTag === newTag) return config
+
+  const route = config.route ? {
+    ...config.route,
+    rules: renameInboundRouteRules(config.route.rules, oldTag, newTag),
+  } : config.route
+
+  const dns = config.dns ? {
+    ...config.dns,
+    rules: renameInboundDnsRules(config.dns.rules, oldTag, newTag),
+  } : config.dns
+
+  const experimental = config.experimental ? {
+    ...config.experimental,
+    v2ray_api: config.experimental.v2ray_api ? {
+      ...config.experimental.v2ray_api,
+      stats: config.experimental.v2ray_api.stats ? {
+        ...config.experimental.v2ray_api.stats,
+        inbounds: renameInArray(config.experimental.v2ray_api.stats.inbounds, oldTag, newTag),
+      } : config.experimental.v2ray_api.stats,
+    } : config.experimental.v2ray_api,
+  } : config.experimental
+
+  return {
+    ...config,
+    dns,
+    route,
+    experimental,
+  }
+}
+
 // ============= Store Interface =============
 
 interface BalancerState {
@@ -1245,16 +1386,22 @@ export const useSingboxConfigStore = create<SingboxConfigStore>((set, get) => ({
 
   setEndpoint: (index, endpoint) => set((state) => {
     const endpoints = [...(state.config.endpoints || [])]
+    const oldTag = endpoints[index]?.tag
     if (index >= endpoints.length) {
       endpoints.push(endpoint)
     } else {
       endpoints[index] = endpoint
     }
+    const configWithEndpoint = {
+      ...state.config,
+      endpoints,
+    }
     return {
-      config: {
-        ...state.config,
-        endpoints,
-      },
+      config: renameOutboundReferences(
+        renameInboundReferences(configWithEndpoint, oldTag, endpoint.tag),
+        oldTag,
+        endpoint.tag
+      ),
     }
   }),
 
@@ -1283,16 +1430,18 @@ export const useSingboxConfigStore = create<SingboxConfigStore>((set, get) => ({
 
   setInbound: (index, inbound) => set((state) => {
     const inbounds = [...(state.config.inbounds || [])]
+    const oldTag = inbounds[index]?.tag
     if (index >= inbounds.length) {
       inbounds.push(inbound)
     } else {
       inbounds[index] = inbound
     }
+    const configWithInbound = {
+      ...state.config,
+      inbounds,
+    }
     return {
-      config: {
-        ...state.config,
-        inbounds,
-      },
+      config: renameInboundReferences(configWithInbound, oldTag, inbound.tag),
     }
   }),
 
@@ -1321,16 +1470,18 @@ export const useSingboxConfigStore = create<SingboxConfigStore>((set, get) => ({
 
   setOutbound: (index, outbound) => set((state) => {
     const outbounds = [...(state.config.outbounds || [])]
+    const oldTag = outbounds[index]?.tag
     if (index >= outbounds.length) {
       outbounds.push(outbound)
     } else {
       outbounds[index] = outbound
     }
+    const configWithOutbound = {
+      ...state.config,
+      outbounds,
+    }
     return {
-      config: {
-        ...state.config,
-        outbounds,
-      },
+      config: renameOutboundReferences(configWithOutbound, oldTag, outbound.tag),
     }
   }),
 
@@ -1680,8 +1831,9 @@ export const useSingboxConfigStore = create<SingboxConfigStore>((set, get) => ({
       }
     }
 
-    // Ensure direct and block outbounds exist if route is configured
-    if (config.route && config.route.rules && config.route.rules.length > 0) {
+    // Ensure direct and block outbounds exist if route rules or final can reference them.
+    if (config.route && ((config.route.rules?.length || 0) > 0 ||
+        config.route.final === "direct" || config.route.final === "block")) {
       const hasDirectTag = outbounds.some((o) => o.tag === "direct")
       const hasBlockTag = outbounds.some((o) => o.tag === "block")
 
@@ -1744,6 +1896,20 @@ export const useSingboxConfigStore = create<SingboxConfigStore>((set, get) => ({
       fullConfig.outbounds = outbounds
     }
 
+    const firstProxyOutboundTag = outbounds.find((o) =>
+      o.tag && o.type !== "direct" && o.type !== "block" && o.type !== "dns"
+    )?.tag || (fullConfig.endpoints || []).find((ep) => {
+      if (!ep.tag || ep.type === "direct" || ep.type === "block" || ep.type === "dns") return false
+      if (ep.type === "wireguard") return wgOutboundTags.has(ep.tag)
+      return true
+    })?.tag
+
+    const firstAvailableOutboundTag = outbounds.find((o) => o.tag)?.tag ||
+      (fullConfig.endpoints || []).find((ep) => ep.tag)?.tag ||
+      "proxy_out"
+
+    const defaultRouteFinal = config.route?.final || firstProxyOutboundTag || firstAvailableOutboundTag
+
     // Auto-fill domain_resolver for DNS servers that use domain addresses (https/tls/quic/h3)
     if (fullConfig.dns?.servers) {
       const domainTypes = new Set(["https", "tls", "quic", "h3"])
@@ -1769,47 +1935,32 @@ export const useSingboxConfigStore = create<SingboxConfigStore>((set, get) => ({
       }
     }
 
-    // If no proxy outbound, override DNS and route with minimal direct config
-    // (split-routing DNS and geo rule_sets are pointless when everything goes direct)
+    // If no proxy outbound, use minimal direct DNS. Route rules are still preserved below.
     if (!hasProxyOutbound) {
       fullConfig.dns = {
         servers: [{ tag: "local_dns", type: "udp", server: "8.8.8.8" }],
         final: "local_dns",
         independent_cache: true,
       }
-      fullConfig.route = {
-        rules: [],
-        final: "proxy_out",
-        default_domain_resolver: "local_dns",
-      }
-      return fullConfig
-    }
-
-    // Proxy outbound (non-balancer): override DNS and route with minimal global-proxy config
-    //
-    // DNS 设计:
-    //   - remote_dns 通过 proxy_out 出站, 承担用户流量 DNS, 防污染/泄漏
-    //   - local_resolver 不设 detour, sing-box 1.13 默认即走 direct
-    //     (显式 detour 到一条空 direct 出站会被 1.13 拒绝启动, 错误:
-    //      "detour to an empty direct outbound makes no sense")
-    //   - default_domain_resolver 指向 local_resolver, 让路由规则中的域名解析
-    //     在代理通道未就绪时也能完成 (WG peer 若是域名需要在握手前解析)
-    //   - dns.final 仍是 remote_dns: 用户正常上网时域名通过 WARP 解析
-    if (!balancerState.enabled) {
+    } else if (!balancerState.enabled) {
+      // Proxy outbound (non-balancer): keep user route rules and use proxy DNS defaults.
+      //
+      // DNS 设计:
+      //   - remote_dns 通过当前代理出站, 承担用户流量 DNS, 防污染/泄漏
+      //   - local_resolver 不设 detour, sing-box 1.13 默认即走 direct
+      //     (显式 detour 到一条空 direct 出站会被 1.13 拒绝启动, 错误:
+      //      "detour to an empty direct outbound makes no sense")
+      //   - default_domain_resolver 指向 local_resolver, 让路由规则中的域名解析
+      //     在代理通道未就绪时也能完成 (WG peer 若是域名需要在握手前解析)
+      //   - dns.final 仍是 remote_dns: 用户正常上网时域名通过 WARP 解析
       fullConfig.dns = {
         servers: [
-          { tag: "remote_dns", type: "udp", server: "8.8.8.8", detour: "proxy_out" },
+          { tag: "remote_dns", type: "udp", server: "8.8.8.8", detour: firstProxyOutboundTag || defaultRouteFinal },
           { tag: "local_resolver", type: "udp", server: "1.1.1.1" },
         ],
         final: "remote_dns",
         independent_cache: true,
       }
-      fullConfig.route = {
-        rules: [],
-        final: "proxy_out",
-        default_domain_resolver: "local_resolver",
-      }
-      return fullConfig
     }
 
     // Balancer mode: build urltest outbound and route from existing config.
@@ -1919,10 +2070,14 @@ export const useSingboxConfigStore = create<SingboxConfigStore>((set, get) => ({
           ...config.route,
           rule_set: ruleSetDefs.length > 0 ? ruleSetDefs : undefined,
           rules: filteredRules,
-          final: config.route.final || "proxy_out",
+          final: config.route.final || defaultRouteFinal,
         }
       }
     } else if (outbounds.length > 0) {
+      if (!outbounds.some((o) => o.tag === "direct")) {
+        outbounds.push({ type: "direct", tag: "direct" })
+        fullConfig.outbounds = outbounds
+      }
       // Create default route with final pointing to proxy_out
       // Note: action is required in sing-box 1.11.0+
       fullConfig.route = {
@@ -1957,18 +2112,26 @@ export const useSingboxConfigStore = create<SingboxConfigStore>((set, get) => ({
             outbound: "direct",
           },
         ],
-        final: "proxy_out",
+        final: defaultRouteFinal,
         default_domain_resolver: "local_dns",
       }
     }
 
-    // Ensure route.default_domain_resolver is always set (required by sing-box 1.12.0+)
-    if (fullConfig.route && !fullConfig.route.default_domain_resolver && fullConfig.dns?.servers) {
-      const ipResolver = fullConfig.dns.servers.find(
-        (s) => (s.type === "udp" || s.type === "tcp") && s.server && /^[\d.:]+$/.test(s.server)
-      )
-      if (ipResolver) {
-        fullConfig.route.default_domain_resolver = ipResolver.tag
+    // Ensure route.default_domain_resolver is always set and references an existing DNS server.
+    if (fullConfig.route && fullConfig.dns?.servers) {
+      const dnsServerTags = new Set(fullConfig.dns.servers.map((server) => server.tag).filter(Boolean))
+      const currentResolver = fullConfig.route.default_domain_resolver
+      const currentResolverTag = typeof currentResolver === "string" ? currentResolver : currentResolver?.server
+
+      if (!currentResolverTag || !dnsServerTags.has(currentResolverTag)) {
+        const preferredResolver = fullConfig.dns.servers.find((server) => server.tag === "local_resolver") ||
+          fullConfig.dns.servers.find((server) => server.tag === "local_dns") ||
+          fullConfig.dns.servers.find(
+            (server) => (server.type === "udp" || server.type === "tcp") && server.server && /^[\d.:]+$/.test(server.server)
+          )
+        if (preferredResolver?.tag) {
+          fullConfig.route.default_domain_resolver = preferredResolver.tag
+        }
       }
     }
 

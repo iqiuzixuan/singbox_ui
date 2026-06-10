@@ -1,12 +1,12 @@
 "use client"
 
-import { useState, useEffect, useRef } from "react"
+import { useState, useEffect } from "react"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
-import { Loader2, RefreshCw, Check } from "lucide-react"
+import { Loader2, RefreshCw, Check, Plus, Trash2 } from "lucide-react"
 import { useToast } from "@/hooks/use-toast"
 import { Checkbox } from "@/components/ui/checkbox"
 import { useSingboxConfigStore } from "@/lib/store/singbox-config"
@@ -55,20 +55,35 @@ function generateNodeTag(type: string, address: string, port: number): string {
   return `${typeTag}-${safeAddress}-${port}`
 }
 
+function defaultOutboundTag(type: string): string {
+  if (type === "direct") return "direct"
+  if (type === "block") return "block"
+  return "proxy_out"
+}
+
+function makeUniqueOutboundTag(base: string, usedTags: Set<string>): string {
+  const fallback = base.trim() || "proxy_out"
+  if (!usedTags.has(fallback)) return fallback
+  let index = 2
+  let candidate = `${fallback}-${index}`
+  while (usedTags.has(candidate)) {
+    index += 1
+    candidate = `${fallback}-${index}`
+  }
+  return candidate
+}
+
 export function OutboundConfig({ showCard = true }: OutboundConfigProps) {
-  const { config, setOutbound, setBalancerState } = useSingboxConfigStore()
-  const initialConfig = config.outbounds?.[0]
+  const { config, setOutbound, addOutbound, removeOutbound, setBalancerState } = useSingboxConfigStore()
+  const outbounds = config.outbounds || []
+  const [selectedOutboundIndex, setSelectedOutboundIndex] = useState(() => outbounds.length > 0 ? 0 : -1)
+  const initialConfig = selectedOutboundIndex >= 0 ? outbounds[selectedOutboundIndex] : undefined
   const { toast } = useToast()
   const { t } = useTranslation("outbound")
   const { t: tc } = useTranslation("common")
   const [outboundType, setOutboundType] = useState("subscription")
+  const [outboundTag, setOutboundTag] = useState(initialConfig?.tag || "proxy_out")
   const [error, setError] = useState("")
-
-  const isInitializedRef = useRef(false)
-  const prevSelectedNodeRef = useRef<ProxyNode | null>(null)
-  // Track whether a tab change was user-initiated vs. derived from loaded config.
-  // Prevents the subscription branch from overwriting a loaded protocol config on init.
-  const hasUserChangedTabRef = useRef(false)
 
   // Subscription state
   const [subscriptions, setSubscriptions] = useState<SubscriptionEntry[]>([])
@@ -80,18 +95,26 @@ export function OutboundConfig({ showCard = true }: OutboundConfigProps) {
   const [selectedNodeTags, setSelectedNodeTags] = useState<string[]>([])
   const [balancerStrategy, setBalancerStrategy] = useState<string>("50")
 
-  // Initialize outbound type from store
   useEffect(() => {
-    if (isInitializedRef.current) return
+    if (outbounds.length === 0) {
+      if (selectedOutboundIndex !== -1) setSelectedOutboundIndex(-1)
+      return
+    }
+    if (selectedOutboundIndex < 0 || selectedOutboundIndex >= outbounds.length) {
+      setSelectedOutboundIndex(0)
+    }
+  }, [outbounds.length, selectedOutboundIndex])
+
+  // Sync outbound type/tag from the currently selected store item.
+  useEffect(() => {
     if (initialConfig && initialConfig.type) {
       setOutboundType(initialConfig.type)
-      // A specific protocol is loaded — don't let the subscription branch overwrite it
+      setOutboundTag(initialConfig.tag || defaultOutboundTag(initialConfig.type))
     } else {
-      // No loaded config: subscription tab is the correct default, allow it to set direct
-      hasUserChangedTabRef.current = true
+      setOutboundTag("proxy_out")
+      setOutboundType("subscription")
     }
-    isInitializedRef.current = true
-  }, [initialConfig])
+  }, [selectedOutboundIndex, initialConfig?.type, initialConfig?.tag])
 
   // Balancer state sync
   useEffect(() => {
@@ -115,32 +138,6 @@ export function OutboundConfig({ showCard = true }: OutboundConfigProps) {
       setBalancerState(null)
     }
   }, [enableBalancer, selectedNodeTags, balancerStrategy, subscriptions, setBalancerState])
-
-  // Handle outbound type changes — write store immediately so JSON stays in sync
-  useEffect(() => {
-    if (!isInitializedRef.current) return
-    if (outboundType === "direct") {
-      setOutbound(0, { type: "direct", tag: "direct" })
-    } else if (outboundType === "block") {
-      setOutbound(0, { type: "block", tag: "block" })
-    } else if (outboundType === "subscription") {
-      if (selectedNode?.outbound && selectedNode !== prevSelectedNodeRef.current) {
-        const outboundWithProxyTag = { ...selectedNode.outbound, tag: "proxy_out" } as any
-        setOutbound(0, outboundWithProxyTag)
-        prevSelectedNodeRef.current = selectedNode
-      } else if (!selectedNode && hasUserChangedTabRef.current) {
-        // Only reset to direct when the user explicitly switched to subscription tab.
-        // Skipping this during initialization prevents overwriting a loaded protocol config.
-        setOutbound(0, { type: "direct", tag: "proxy_out" })
-      }
-    } else {
-      // Only write placeholder if the stored outbound doesn't already have this type
-      const currentType = useSingboxConfigStore.getState().config.outbounds?.[0]?.type
-      if (currentType !== outboundType) {
-        setOutbound(0, { type: outboundType as any, tag: "proxy_out" })
-      }
-    }
-  }, [outboundType, selectedNode, setOutbound])
 
   // Load subscription nodes
   useEffect(() => {
@@ -188,10 +185,12 @@ export function OutboundConfig({ showCard = true }: OutboundConfigProps) {
 
   // Select subscription node (single-select mode)
   const handleSelectNode = (node: ProxyNode) => {
+    if (selectedOutboundIndex < 0) return
     setSelectedNode(node)
     if (node.outbound) {
-      const outboundWithProxyTag = { ...node.outbound, tag: "proxy_out" } as any
-      setOutbound(0, outboundWithProxyTag)
+      const tag = outboundTag.trim() || "proxy_out"
+      const outboundWithProxyTag = { ...node.outbound, tag } as any
+      setOutbound(selectedOutboundIndex, outboundWithProxyTag)
     }
     const nodeName = String(node.name || 'Unknown')
     toast({
@@ -213,30 +212,143 @@ export function OutboundConfig({ showCard = true }: OutboundConfigProps) {
 
   const totalNodes = subscriptions.reduce((sum, sub) => sum + (sub.nodes?.length || 0), 0)
 
+  const handleOutboundTypeChange = (value: string) => {
+    setOutboundType(value)
+    if (selectedOutboundIndex < 0 || selectedOutboundIndex >= outbounds.length) return
+
+    const tag = outboundTag.trim() || defaultOutboundTag(value)
+    if (value === "direct") {
+      setOutbound(selectedOutboundIndex, { type: "direct", tag })
+      return
+    }
+    if (value === "block") {
+      setOutbound(selectedOutboundIndex, { type: "block", tag })
+      return
+    }
+    if (value === "subscription") {
+      if (selectedNode?.outbound) {
+        setOutbound(selectedOutboundIndex, { ...selectedNode.outbound, tag } as any)
+      } else {
+        setOutbound(selectedOutboundIndex, { type: "direct", tag })
+      }
+      return
+    }
+    setOutbound(selectedOutboundIndex, { type: value as any, tag })
+  }
+
+  const handleAddOutbound = () => {
+    const usedTags = new Set(outbounds.map((outbound) => outbound.tag).filter(Boolean))
+    const tag = makeUniqueOutboundTag("proxy_out", usedTags)
+    const nextIndex = outbounds.length
+    addOutbound({ type: "direct", tag })
+    setSelectedOutboundIndex(nextIndex)
+    setOutboundType("direct")
+    setOutboundTag(tag)
+  }
+
+  const handleRemoveOutbound = () => {
+    if (selectedOutboundIndex < 0) return
+    if (!window.confirm(t("confirmRemove"))) return
+    removeOutbound(selectedOutboundIndex)
+    setSelectedOutboundIndex(-1)
+  }
+
+  const updateOutboundTag = (value: string) => {
+    setOutboundTag(value)
+    const tag = value.trim()
+    if (!tag) return
+    if (selectedOutboundIndex < 0) return
+    const currentOutbound = useSingboxConfigStore.getState().config.outbounds?.[selectedOutboundIndex]
+    if (currentOutbound) {
+      setOutbound(selectedOutboundIndex, { ...currentOutbound, tag })
+    }
+  }
+
+  const setOutboundWithTag = (index: number, outbound: any) => {
+    if (selectedOutboundIndex < 0) return
+    const tag = outboundTag.trim() || outbound.tag || defaultOutboundTag(outboundType)
+    setOutbound(selectedOutboundIndex, { ...outbound, tag })
+  }
+
   // Shared form props
-  const formProps = { initialConfig, setOutbound }
+  const formProps = { initialConfig, setOutbound: setOutboundWithTag }
 
   const content = (
     <div className="space-y-6">
-      <Tabs value={outboundType} onValueChange={(value) => { hasUserChangedTabRef.current = true; setOutboundType(value) }} className="w-full">
-        <TabsList className="flex flex-wrap h-auto w-full justify-start gap-1 p-1 bg-white/50 dark:bg-zinc-900/50 backdrop-blur-sm rounded-xl border border-zinc-200/50 dark:border-zinc-800/50 shadow-sm">
-          <TabsTrigger className={tabTriggerClass} value="subscription">{t("subscription")}</TabsTrigger>
-          <TabsTrigger className={tabTriggerClass} value="direct">{t("direct")}</TabsTrigger>
-          <TabsTrigger className={tabTriggerClass} value="block">{t("block")}</TabsTrigger>
-          <div className="w-px h-6 bg-zinc-300 dark:bg-zinc-700 mx-1 self-center"></div>
-          <TabsTrigger className={tabTriggerClass} value="vless">VLESS</TabsTrigger>
-          <TabsTrigger className={tabTriggerClass} value="vmess">VMess</TabsTrigger>
-          <TabsTrigger className={tabTriggerClass} value="trojan">Trojan</TabsTrigger>
-          <TabsTrigger className={tabTriggerClass} value="shadowsocks">Shadowsocks</TabsTrigger>
-          <TabsTrigger className={tabTriggerClass} value="hysteria2">Hysteria2</TabsTrigger>
-          <TabsTrigger className={tabTriggerClass} value="anytls">AnyTLS</TabsTrigger>
-          <TabsTrigger className={tabTriggerClass} value="wireguard">WireGuard</TabsTrigger>
-          <TabsTrigger className={tabTriggerClass} value="warp">WARP</TabsTrigger>
-          <TabsTrigger className={tabTriggerClass} value="socks">Socks</TabsTrigger>
-          <TabsTrigger className={tabTriggerClass} value="http">HTTP</TabsTrigger>
-        </TabsList>
+      <div className="space-y-3">
+        <div className="flex items-center justify-between gap-3">
+          <Label>{t("outboundList")}</Label>
+          <div className="flex items-center gap-2">
+            {initialConfig && (
+              <Button size="sm" variant="outline" onClick={handleRemoveOutbound}>
+                <Trash2 className="h-4 w-4 mr-1" />
+                {t("removeOutbound")}
+              </Button>
+            )}
+            <Button size="sm" onClick={handleAddOutbound}>
+              <Plus className="h-4 w-4 mr-1" />
+              {t("addOutbound")}
+            </Button>
+          </div>
+        </div>
 
-        <div className="pt-8 animate-in fade-in slide-in-from-bottom-2 duration-500">
+        {outbounds.length === 0 ? (
+          <div className="rounded-lg border border-dashed p-4 text-sm text-muted-foreground">
+            <p>{t("noOutbound")}</p>
+            <p className="mt-1 text-xs">{t("noOutboundHint")}</p>
+          </div>
+        ) : (
+          <div className="flex flex-wrap gap-2">
+            {outbounds.map((outbound, index) => (
+              <button
+                key={`${outbound.tag || "outbound"}:${index}`}
+                type="button"
+                onClick={() => setSelectedOutboundIndex(index)}
+                className={`rounded-md border px-3 py-2 text-left text-sm transition-colors ${
+                  index === selectedOutboundIndex
+                    ? "border-primary bg-primary/10 text-primary"
+                    : "border-border hover:bg-muted"
+                }`}
+              >
+                <span className="block font-medium">{outbound.tag || `${t("title")} ${index + 1}`}</span>
+                <span className="block text-xs text-muted-foreground">{outbound.type || "unknown"}</span>
+              </button>
+            ))}
+          </div>
+        )}
+      </div>
+
+      {initialConfig && (
+        <>
+          <div className="space-y-2">
+            <Label>{t("tagLabel")}</Label>
+            <Input
+              value={outboundTag}
+              onChange={(e) => updateOutboundTag(e.target.value)}
+              placeholder="proxy_out"
+            />
+            <p className="text-xs text-muted-foreground">{t("tagDesc")}</p>
+          </div>
+
+          <Tabs value={outboundType} onValueChange={handleOutboundTypeChange} className="w-full">
+            <TabsList className="flex flex-wrap h-auto w-full justify-start gap-1 p-1 bg-white/50 dark:bg-zinc-900/50 backdrop-blur-sm rounded-xl border border-zinc-200/50 dark:border-zinc-800/50 shadow-sm">
+              <TabsTrigger className={tabTriggerClass} value="subscription">{t("subscription")}</TabsTrigger>
+              <TabsTrigger className={tabTriggerClass} value="direct">{t("direct")}</TabsTrigger>
+              <TabsTrigger className={tabTriggerClass} value="block">{t("block")}</TabsTrigger>
+              <div className="w-px h-6 bg-zinc-300 dark:bg-zinc-700 mx-1 self-center"></div>
+              <TabsTrigger className={tabTriggerClass} value="vless">VLESS</TabsTrigger>
+              <TabsTrigger className={tabTriggerClass} value="vmess">VMess</TabsTrigger>
+              <TabsTrigger className={tabTriggerClass} value="trojan">Trojan</TabsTrigger>
+              <TabsTrigger className={tabTriggerClass} value="shadowsocks">Shadowsocks</TabsTrigger>
+              <TabsTrigger className={tabTriggerClass} value="hysteria2">Hysteria2</TabsTrigger>
+              <TabsTrigger className={tabTriggerClass} value="anytls">AnyTLS</TabsTrigger>
+              <TabsTrigger className={tabTriggerClass} value="wireguard">WireGuard</TabsTrigger>
+              <TabsTrigger className={tabTriggerClass} value="warp">WARP</TabsTrigger>
+              <TabsTrigger className={tabTriggerClass} value="socks">Socks</TabsTrigger>
+              <TabsTrigger className={tabTriggerClass} value="http">HTTP</TabsTrigger>
+            </TabsList>
+
+            <div key={selectedOutboundIndex} className="pt-8 animate-in fade-in slide-in-from-bottom-2 duration-500">
             {/* Subscription node selection */}
             <TabsContent value="subscription" className="space-y-4 m-0">
               <div className="flex items-center justify-between">
@@ -425,8 +537,10 @@ export function OutboundConfig({ showCard = true }: OutboundConfigProps) {
             <TabsContent value="shadowsocks"><ShadowsocksForm {...formProps} /></TabsContent>
             <TabsContent value="hysteria2"><Hysteria2Form {...formProps} /></TabsContent>
             <TabsContent value="anytls"><AnytlsForm {...formProps} /></TabsContent>
-          </div>
-        </Tabs>
+            </div>
+          </Tabs>
+        </>
+      )}
 
       {error && (
         <div className="mt-4 p-3 text-sm text-destructive bg-destructive/10 rounded-md">{error}</div>

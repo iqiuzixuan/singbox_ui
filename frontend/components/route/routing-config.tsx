@@ -1,7 +1,7 @@
 "use client"
 
 import { useState, useEffect, useRef } from "react"
-import { Route } from "lucide-react"
+import { Plus, Route, Trash2 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
@@ -19,12 +19,32 @@ import { CnIpTab } from "./cn-ip-tab"
 interface RoutingConfigProps {
   showCard?: boolean
   availableOutbounds?: string[]
+  availableInbounds?: string[]
 }
 
 // Stable default to avoid useEffect infinite loops from reference changes
 const EMPTY_OUTBOUNDS: string[] = []
+const EMPTY_INBOUNDS: string[] = []
 
-export function RoutingConfig({ showCard = true, availableOutbounds = EMPTY_OUTBOUNDS }: RoutingConfigProps) {
+interface InboundForwardRule {
+  inbound: string
+  outbound: string
+}
+
+const INBOUND_FORWARD_RULE_KEYS = new Set(["action", "inbound", "outbound"])
+
+function isInboundForwardRule(rule: RouteRule): boolean {
+  return rule.action === "route" &&
+    !!rule.outbound &&
+    (rule.inbound?.length || 0) > 0 &&
+    Object.keys(rule).every((key) => INBOUND_FORWARD_RULE_KEYS.has(key))
+}
+
+export function RoutingConfig({
+  showCard = true,
+  availableOutbounds = EMPTY_OUTBOUNDS,
+  availableInbounds = EMPTY_INBOUNDS,
+}: RoutingConfigProps) {
   const { config, setRouting } = useSingboxConfigStore()
   const { t } = useTranslation("routing")
   const initialConfig = config.route
@@ -34,6 +54,7 @@ export function RoutingConfig({ showCard = true, availableOutbounds = EMPTY_OUTB
   const [defaultDomainResolver, setDefaultDomainResolver] = useState("local_dns")
   const [activeTab, setActiveTab] = useState("direct")
   const [routeMode, setRouteMode] = useState<"rules" | "global_proxy" | "global_direct">("global_proxy")
+  const [inboundForwards, setInboundForwards] = useState<InboundForwardRule[]>([])
 
   // Passwall-style list state
   const [directDomains, setDirectDomains] = useState("")
@@ -53,11 +74,12 @@ export function RoutingConfig({ showCard = true, availableOutbounds = EMPTY_OUTB
   const isInitializedRef = useRef(false)
 
   // Initialize from initialConfig (first load only)
-  // Note: we do NOT set isInitializedRef.current = true when initialConfig is absent,
-  // so that Effect 2 stays gated and we retry once the config actually arrives from the server.
   useEffect(() => {
     if (isInitializedRef.current) return
-    if (!initialConfig) return  // wait for config to load before initializing
+    if (!initialConfig) {
+      isInitializedRef.current = true
+      return
+    }
 
     if (initialConfig.final) {
       setFinalOutbound(initialConfig.final)
@@ -66,9 +88,17 @@ export function RoutingConfig({ showCard = true, availableOutbounds = EMPTY_OUTB
       const resolver = initialConfig.default_domain_resolver
       setDefaultDomainResolver(typeof resolver === "string" ? resolver : resolver.server || "")
     }
+    if ((initialConfig.rules || []).length > 0) {
+      setRouteMode("rules")
+    } else if (initialConfig.final === "direct") {
+      setRouteMode("global_direct")
+    } else {
+      setRouteMode("global_proxy")
+    }
 
     // Reverse-parse existing rules into Passwall lists
     const manualRules: RouteRule[] = []
+    const parsedInboundForwards: InboundForwardRule[] = []
     const dDomains: string[] = []
     const dIps: string[] = []
     const pDomains: string[] = []
@@ -78,6 +108,13 @@ export function RoutingConfig({ showCard = true, availableOutbounds = EMPTY_OUTB
 
     for (const rule of initialConfig.rules || []) {
       let classified = false
+
+      if (isInboundForwardRule(rule)) {
+        for (const inbound of rule.inbound || []) {
+          parsedInboundForwards.push({ inbound, outbound: rule.outbound || "proxy_out" })
+        }
+        classified = true
+      }
 
       // Detect preset rule_set rules
       if (rule.rule_set?.length === 1) {
@@ -137,6 +174,7 @@ export function RoutingConfig({ showCard = true, availableOutbounds = EMPTY_OUTB
     setProxyIps(pIps.join("\n"))
     setBlockDomains(bDomains.join("\n"))
     setBlockIps(bIps.join("\n"))
+    setInboundForwards(parsedInboundForwards)
     setRules(manualRules)
 
     isInitializedRef.current = true
@@ -152,6 +190,9 @@ export function RoutingConfig({ showCard = true, availableOutbounds = EMPTY_OUTB
     const proxyTag = availableOutbounds.includes("proxy_out")
       ? "proxy_out"
       : (availableOutbounds.find((t) => t !== "direct" && t !== "block") || "proxy_out")
+    const effectiveFinalOutbound = availableOutbounds.includes(finalOutbound)
+      ? finalOutbound
+      : proxyTag
 
     // Global mode: DNS/route are fully managed by buildFullConfig; just set the final tag
     if (routeMode === "global_proxy" || routeMode === "global_direct") {
@@ -161,6 +202,13 @@ export function RoutingConfig({ showCard = true, availableOutbounds = EMPTY_OUTB
     }
 
     const generatedRules: RouteRule[] = []
+
+    // Priority 0: inbound forwarding rules
+    for (const item of inboundForwards) {
+      if (item.inbound && item.outbound) {
+        generatedRules.push({ action: "route", inbound: [item.inbound], outbound: item.outbound })
+      }
+    }
 
     // Priority 1: block rules
     if (enableBlockAds) {
@@ -216,7 +264,7 @@ export function RoutingConfig({ showCard = true, availableOutbounds = EMPTY_OUTB
     // Append manual rules
     const allRules = [...generatedRules, ...rules.filter((r) => r.outbound || r.action)]
 
-    const routingConfig: any = { rules: allRules, final: finalOutbound }
+    const routingConfig: any = { rules: allRules, final: effectiveFinalOutbound }
     if (defaultDomainResolver) {
       routingConfig.default_domain_resolver = defaultDomainResolver
     }
@@ -225,10 +273,31 @@ export function RoutingConfig({ showCard = true, availableOutbounds = EMPTY_OUTB
     routeMode, finalOutbound, rules, defaultDomainResolver,
     directDomains, directIps, proxyDomains, proxyIps,
     blockDomains, blockIps,
+    inboundForwards,
     enableGfw, enableCnDomain, enableCnIp,
     enableBlockAds, enablePrivateIpDirect,
     availableOutbounds, setRouting,
   ])
+
+  const addInboundForward = () => {
+    setInboundForwards((current) => [
+      ...current,
+      {
+        inbound: availableInbounds[0] || "",
+        outbound: availableOutbounds[0] || finalOutbound || "proxy_out",
+      },
+    ])
+  }
+
+  const updateInboundForward = (index: number, patch: Partial<InboundForwardRule>) => {
+    setInboundForwards((current) =>
+      current.map((item, itemIndex) => itemIndex === index ? { ...item, ...patch } : item)
+    )
+  }
+
+  const removeInboundForward = (index: number) => {
+    setInboundForwards((current) => current.filter((_, itemIndex) => itemIndex !== index))
+  }
 
   const content = (
     <div className="space-y-4">
@@ -265,6 +334,75 @@ export function RoutingConfig({ showCard = true, availableOutbounds = EMPTY_OUTB
       {/* Rule split mode: final outbound + domain resolver + tab lists */}
       {routeMode === "rules" && (
         <>
+          <div className="space-y-4 p-4 rounded-xl bg-zinc-50/50 dark:bg-zinc-950/50 border border-zinc-100 dark:border-zinc-800/50">
+            <div className="flex items-center justify-between gap-3">
+              <div>
+                <Label>{t("inboundForwarding")}</Label>
+                <p className="text-xs text-muted-foreground mt-1">{t("inboundForwardingDesc")}</p>
+              </div>
+              <Button type="button" variant="outline" size="sm" onClick={addInboundForward}>
+                <Plus className="h-4 w-4 mr-1" />
+                {t("addInboundForward")}
+              </Button>
+            </div>
+
+            {inboundForwards.length === 0 ? (
+              <div className="rounded-lg border border-dashed p-4 text-sm text-muted-foreground">
+                {t("noInboundForwards")}
+              </div>
+            ) : (
+              <div className="space-y-2">
+                {inboundForwards.map((item, index) => (
+                  <div key={index} className="grid grid-cols-[1fr_1fr_auto] gap-2 items-center">
+                    <select
+                      className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+                      value={item.inbound}
+                      onChange={(event) => updateInboundForward(index, { inbound: event.target.value })}
+                    >
+                      {item.inbound && !availableInbounds.includes(item.inbound) && (
+                        <option value={item.inbound}>{item.inbound}</option>
+                      )}
+                      {availableInbounds.length > 0 ? (
+                        availableInbounds.map((tag) => (
+                          <option key={tag} value={tag}>{tag}</option>
+                        ))
+                      ) : (
+                        <option value="">{t("noAvailableInbounds")}</option>
+                      )}
+                    </select>
+
+                    <select
+                      className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+                      value={item.outbound}
+                      onChange={(event) => updateInboundForward(index, { outbound: event.target.value })}
+                    >
+                      {item.outbound && !availableOutbounds.includes(item.outbound) && (
+                        <option value={item.outbound}>{item.outbound}</option>
+                      )}
+                      {availableOutbounds.length > 0 ? (
+                        availableOutbounds.map((tag) => (
+                          <option key={tag} value={tag}>{tag}</option>
+                        ))
+                      ) : (
+                        <option value="proxy_out">proxy_out</option>
+                      )}
+                    </select>
+
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="icon"
+                      onClick={() => removeInboundForward(index)}
+                      className="h-10 w-10 text-muted-foreground hover:text-destructive"
+                    >
+                      <Trash2 className="h-4 w-4" />
+                    </Button>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+
           <div className="space-y-4 p-4 rounded-xl bg-zinc-50/50 dark:bg-zinc-950/50 border border-zinc-100 dark:border-zinc-800/50">
             <div className="space-y-2">
               <Label>{t("finalOutbound")} (final)</Label>

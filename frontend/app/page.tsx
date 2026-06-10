@@ -281,9 +281,25 @@ export default function Home() {
   }
 
   const availableOutbounds = useMemo(() => {
-    const tags = (config.outbounds ?? []).map((o) => o.tag).filter(Boolean)
-    return tags.length > 0 ? tags : ["direct", "block"]
+    const tags = new Set<string>()
+    for (const outbound of config.outbounds ?? []) {
+      if (outbound.tag) tags.add(outbound.tag)
+    }
+    tags.add("direct")
+    tags.add("block")
+    return Array.from(tags)
   }, [config.outbounds])
+
+  const availableInbounds = useMemo(() => {
+    const tags = new Set<string>()
+    for (const inbound of config.inbounds ?? []) {
+      if (inbound.tag) tags.add(inbound.tag)
+    }
+    for (const endpoint of config.endpoints ?? []) {
+      if (endpoint.tag && endpoint.listen_port) tags.add(endpoint.tag)
+    }
+    return Array.from(tags)
+  }, [config.inbounds, config.endpoints])
 
   const tabs = [
     { id: "subscription" as const, label: t("tabs.subscription"), icon: Rss },
@@ -497,7 +513,13 @@ export default function Home() {
                   {activeTab === "subscription" && <SubscriptionManager onNodeSelect={(node) => handleOutboundChange(node.outbound)} />}
                   {activeTab === "inbound" && <InboundConfig showCard={false} />}
                   {activeTab === "outbound" && <OutboundConfig showCard={false} />}
-                  {activeTab === "routing" && <RoutingConfig showCard={false} availableOutbounds={availableOutbounds} />}
+                  {activeTab === "routing" && (
+                    <RoutingConfig
+                      showCard={false}
+                      availableOutbounds={availableOutbounds}
+                      availableInbounds={availableInbounds}
+                    />
+                  )}
                   {activeTab === "dns" && <DnsConfigComponent showCard={false} />}
                 </div>
               </div>
