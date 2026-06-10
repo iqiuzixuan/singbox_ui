@@ -11,4 +11,8 @@ services:
       - DATA_DIR=/home/data
       - HOST_DATA_DIR=${PWD}/data
       - LISTEN_ADDR=127.0.0.1:7000
+      # Set both variables to enable username/password sign-in.
+      # - AUTH_USERNAME=admin
+      # - AUTH_PASSWORD=change-me
+      # - AUTH_SECRET=replace-with-a-random-secret
       - TZ=Asia/Shanghai

@@ -33,8 +33,18 @@ func main() {
 	// API 路由组 - 仅提供工具类API
 	api := r.Group("/api")
 	{
+		auth := api.Group("/auth")
+		{
+			auth.GET("/status", handlers.AuthStatus)
+			auth.POST("/login", handlers.Login)
+			auth.POST("/logout", handlers.Logout)
+		}
+
+		protectedAPI := api.Group("")
+		protectedAPI.Use(handlers.AuthMiddleware())
+
 		// WireGuard 密钥生成工具和多客户端管理
-		wg := api.Group("/wireguard")
+		wg := protectedAPI.Group("/wireguard")
 		{
 			// 密钥生成
 			wg.POST("/keygen", handlers.GenerateWireGuardKeys)
@@ -50,7 +60,7 @@ func main() {
 		}
 
 		// sing-box 管理工具 (Docker 容器模式)
-		singbox := api.Group("/singbox")
+		singbox := protectedAPI.Group("/singbox")
 		{
 			singbox.GET("/version", handlers.GetSingboxVersion)
 			singbox.GET("/config", handlers.GetConfig)
@@ -83,20 +93,20 @@ func main() {
 		}
 
 		// 订阅管理
-		sub := api.Group("/subscription")
+		sub := protectedAPI.Group("/subscription")
 		{
-			sub.GET("", handlers.GetSubscriptions)          // 获取所有订阅
-			sub.POST("", handlers.AddSubscription)          // 添加订阅
-			sub.POST("/:id/refresh", handlers.RefreshSubscription)         // 刷新单个订阅
+			sub.GET("", handlers.GetSubscriptions)                          // 获取所有订阅
+			sub.POST("", handlers.AddSubscription)                          // 添加订阅
+			sub.POST("/:id/refresh", handlers.RefreshSubscription)          // 刷新单个订阅
 			sub.PATCH("/:id/settings", handlers.UpdateSubscriptionSettings) // 更新自动更新设置
 			sub.DELETE("/:id", handlers.DeleteSubscription)                 // 删除订阅
-			sub.POST("/refresh-all", handlers.RefreshAllSubscriptions) // 刷新所有订阅
-			sub.GET("/nodes", handlers.GetAllNodes)         // 获取所有节点
-			sub.GET("/user-agents", handlers.GetUserAgents) // 获取预定义 UA 列表
+			sub.POST("/refresh-all", handlers.RefreshAllSubscriptions)      // 刷新所有订阅
+			sub.GET("/nodes", handlers.GetAllNodes)                         // 获取所有节点
+			sub.GET("/user-agents", handlers.GetUserAgents)                 // 获取预定义 UA 列表
 		}
 
 		// 节点探测器
-		prober := api.Group("/prober")
+		prober := protectedAPI.Group("/prober")
 		{
 			prober.GET("/status", handlers.GetProberStatus)
 			prober.GET("/results", handlers.GetProbeResults)
@@ -114,7 +124,7 @@ func main() {
 		}
 
 		// 代理测速：启动临时 sing-box 实例通过 SOCKS/HTTP 代理测试节点
-		speedtest := api.Group("/speedtest")
+		speedtest := protectedAPI.Group("/speedtest")
 		{
 			speedtest.POST("/start", handlers.StartSpeedTest)
 			speedtest.GET("/status", handlers.GetSpeedTestStatus)
@@ -122,7 +132,7 @@ func main() {
 		}
 
 		// Cloudflare WARP：自动注册、WARP+ 许可证绑定、端点扫描
-		warp := api.Group("/warp")
+		warp := protectedAPI.Group("/warp")
 		{
 			warp.GET("/account", handlers.GetWarpAccount)
 			warp.DELETE("/account", handlers.DeleteWarpAccount)

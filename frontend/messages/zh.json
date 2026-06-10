@@ -47,7 +47,25 @@
     "expand": "展开",
     "collapse": "收起",
     "selectPlaceholder": "请选择...",
-    "noResults": "暂无结果"
+    "noResults": "暂无结果",
+    "logout": "退出登录"
+  },
+  "auth": {
+    "title": "登录 sing-box UI",
+    "subtitle": "请输入管理员账号密码后继续管理配置。",
+    "checking": "检查登录状态...",
+    "signIn": "登录",
+    "signingIn": "登录中...",
+    "missingCredentials": "请输入用户名和密码",
+    "invalidCredentials": "用户名或密码不正确",
+    "loginFailed": "登录失败",
+    "sessionExpired": "登录已过期，请重新登录"
+  },
+  "theme": {
+    "label": "主题",
+    "system": "自动",
+    "light": "浅色",
+    "dark": "深色"
   },
   "page": {
     "title": "sing-box 配置管理",

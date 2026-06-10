@@ -110,6 +110,10 @@ services:
       - DATA_DIR=/home/data
       - HOST_DATA_DIR=${PWD}/data
       - LISTEN_ADDR=127.0.0.1:7000
+      # 可选：设置后启用账号密码登录
+      # - AUTH_USERNAME=admin
+      # - AUTH_PASSWORD=change-me
+      # - AUTH_SECRET=replace-with-a-random-secret
       - TZ=Asia/Shanghai
 ```
 
@@ -136,7 +140,7 @@ ssh -L 7000:127.0.0.1:7000 user@your-server
 
 然后在本地浏览器访问 http://127.0.0.1:7000
 
-> **安全提示**: 不建议将 `LISTEN_ADDR` 改为 `0.0.0.0:7000` 直接暴露到公网，管理面板无认证保护。如需外网访问，请使用 SSH 隧道或配置带认证的反向代理（如 Nginx + Basic Auth）。
+> **安全提示**: 不建议将 `LISTEN_ADDR` 改为 `0.0.0.0:7000` 直接暴露到公网。如需外网访问，请至少设置 `AUTH_USERNAME` 和 `AUTH_PASSWORD` 启用登录鉴权，并优先使用 SSH 隧道或反向代理配合 HTTPS。
 
 ---
 
@@ -147,6 +151,10 @@ ssh -L 7000:127.0.0.1:7000 user@your-server
 | `DATA_DIR` | 容器内数据目录 | `/home/data` |
 | `HOST_DATA_DIR` | 宿主机数据目录（用于 sing-box 容器挂载） | `${PWD}/data` |
 | `LISTEN_ADDR` | 服务监听地址 | `127.0.0.1:7000` |
+| `AUTH_USERNAME` | 登录用户名；与 `AUTH_PASSWORD` 同时设置后启用鉴权 | 空（关闭鉴权） |
+| `AUTH_PASSWORD` | 登录密码；与 `AUTH_USERNAME` 同时设置后启用鉴权 | 空（关闭鉴权） |
+| `AUTH_SECRET` | 会话签名密钥，建议使用随机长字符串 | 默认使用 `AUTH_PASSWORD` |
+| `AUTH_SESSION_TTL` | 登录会话有效期，Go duration 格式，如 `24h`、`168h` | `24h` |
 | `TZ` | 时区 | `Asia/Shanghai` |
 
 ---

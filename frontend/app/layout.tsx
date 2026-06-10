@@ -8,6 +8,18 @@ export const metadata: Metadata = {
   description: "sing-box configuration management panel",
 };
 
+const themeInitScript = `
+(() => {
+  try {
+    const mode = localStorage.getItem("singbox_theme_mode") || "system";
+    const systemDark = window.matchMedia("(prefers-color-scheme: dark)").matches;
+    const dark = mode === "dark" || (mode === "system" && systemDark);
+    document.documentElement.classList.toggle("dark", dark);
+    document.documentElement.style.colorScheme = dark ? "dark" : "light";
+  } catch {}
+})();
+`;
+
 export default function RootLayout({
   children,
 }: Readonly<{
@@ -16,6 +28,7 @@ export default function RootLayout({
   return (
     <html lang="zh-CN" suppressHydrationWarning>
       <body className="font-sans">
+        <script dangerouslySetInnerHTML={{ __html: themeInitScript }} />
         <Providers>
           {children}
           <Toaster />

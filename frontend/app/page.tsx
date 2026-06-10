@@ -1,12 +1,10 @@
 "use client"
 
 import { useState, useEffect, useMemo } from "react"
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Label } from "@/components/ui/label"
 import { Input } from "@/components/ui/input"
-import { Badge } from "@/components/ui/badge"
 import { InboundConfig } from "@/components/inbound"
 import { OutboundConfig } from "@/components/outbound"
 import { RoutingConfig } from "@/components/route"
@@ -50,6 +48,9 @@ import {
   Code,
   X,
   Github,
+  PanelLeftClose,
+  PanelLeftOpen,
+  LogOut,
 } from "lucide-react"
 import { useToast } from "@/hooks/use-toast"
 import { SubscriptionManager } from "@/components/subscription-manager"
@@ -58,12 +59,15 @@ import { useSingboxConfigStore } from "@/lib/store/singbox-config"
 import { apiClient } from "@/lib/api"
 import { useTranslation } from "@/lib/i18n"
 import { LanguageSwitcher } from "@/components/language-switcher"
+import { ThemeSwitcher } from "@/components/theme-switcher"
+import { useAuth } from "@/lib/auth"
 import AnsiToHtml from "ansi-to-html"
 
 export default function Home() {
   const { toast } = useToast()
   const { t } = useTranslation("page")
   const { t: tc } = useTranslation("common")
+  const { enabled: authEnabled, logout } = useAuth()
 
   // Global store
   const {
@@ -97,13 +101,13 @@ export default function Home() {
   const [logsDialogOpen, setLogsDialogOpen] = useState(false)
   const [instanceLogs, setInstanceLogs] = useState("")
   const [logsLoading, setLogsLoading] = useState(false)
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(false)
   
   // JSON Drawer State
   const [jsonDrawerOpen, setJsonDrawerOpen] = useState(false)
   const [jsonEditMode, setJsonEditMode] = useState(false)
   const [editedJson, setEditedJson] = useState("")
   
-  const [validating, setValidating] = useState(false)
   const [errorDialogOpen, setErrorDialogOpen] = useState(false)
   const [errorDialogTitle, setErrorDialogTitle] = useState("")
   const [errorDialogMessage, setErrorDialogMessage] = useState("")
@@ -127,6 +131,18 @@ export default function Home() {
     return () => clearInterval(interval)
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
+
+  useEffect(() => {
+    setSidebarCollapsed(localStorage.getItem("singbox_sidebar_collapsed") === "true")
+  }, [])
+
+  const toggleSidebar = () => {
+    setSidebarCollapsed((collapsed) => {
+      const next = !collapsed
+      localStorage.setItem("singbox_sidebar_collapsed", String(next))
+      return next
+    })
+  }
 
   const checkSingboxVersion = async () => {
     try {
@@ -323,75 +339,112 @@ export default function Home() {
     <div className="flex h-screen bg-zinc-50 dark:bg-zinc-950 overflow-hidden font-sans">
       
       {/* Sidebar Navigation */}
-      <aside className="w-64 flex-shrink-0 border-r bg-white dark:bg-zinc-900/40 flex flex-col z-20 shadow-sm">
-        <div className="h-16 flex items-center px-6 border-b border-border/50 shrink-0">
-          <div className="flex items-center gap-3">
-            <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-primary shadow-sm text-primary-foreground">
-              <Zap className="h-4 w-4" />
-            </div>
-            <div>
-              <span className="font-bold text-lg tracking-tight block leading-tight">{t("title")}</span>
-              <span className="text-[10px] text-muted-foreground uppercase tracking-widest">{t("subtitle")}</span>
-            </div>
-          </div>
+      <aside className={`${sidebarCollapsed ? "w-[72px]" : "w-64"} flex-shrink-0 border-r bg-white dark:bg-zinc-900/40 flex flex-col z-20 shadow-sm transition-[width] duration-200 ease-out`}>
+        <div className={`${sidebarCollapsed ? "justify-center px-3" : "justify-between px-4"} h-16 flex items-center border-b border-border/50 shrink-0`}>
+          {sidebarCollapsed ? (
+            <Button
+              variant="ghost"
+              size="icon"
+              className="h-9 w-9 text-muted-foreground hover:text-primary hover:bg-primary/10"
+              title={tc("expand")}
+              onClick={toggleSidebar}
+            >
+              <PanelLeftOpen className="h-4 w-4" />
+            </Button>
+          ) : (
+            <>
+              <div className="flex min-w-0 items-center gap-3">
+                <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-primary shadow-sm text-primary-foreground">
+                  <Zap className="h-4 w-4" />
+                </div>
+                <div className="min-w-0">
+                  <span className="font-bold text-lg tracking-tight block leading-tight truncate">{t("title")}</span>
+                  <span className="text-[10px] text-muted-foreground uppercase tracking-widest">{t("subtitle")}</span>
+                </div>
+              </div>
+              <Button
+                variant="ghost"
+                size="icon"
+                className="h-8 w-8 shrink-0 text-muted-foreground hover:text-primary hover:bg-primary/10"
+                title={tc("collapse")}
+                onClick={toggleSidebar}
+              >
+                <PanelLeftClose className="h-4 w-4" />
+              </Button>
+            </>
+          )}
         </div>
 
-        <nav className="flex-1 py-6 flex flex-col gap-1 px-3 overflow-y-auto">
-          <div className="text-xs font-semibold text-muted-foreground/70 px-3 mb-3 uppercase tracking-wider">
-            {t("configuration")}
-          </div>
+        <nav className={`${sidebarCollapsed ? "items-center px-2" : "px-3"} flex-1 py-6 flex flex-col gap-1 overflow-y-auto`}>
+          {!sidebarCollapsed && (
+            <div className="text-xs font-semibold text-muted-foreground/70 px-3 mb-3 uppercase tracking-wider">
+              {t("configuration")}
+            </div>
+          )}
           {tabs.map((tab) => (
             <button
               key={tab.id}
               onClick={() => setActiveTab(tab.id)}
-              className={`flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-all duration-200 ${
+              title={sidebarCollapsed ? tab.label : undefined}
+              className={`flex items-center ${sidebarCollapsed ? "h-10 w-10 justify-center px-0" : "gap-3 px-3 py-2.5"} rounded-lg text-sm font-medium transition-all duration-200 ${
                 activeTab === tab.id
                   ? "bg-primary/10 text-primary shadow-sm"
                   : "text-muted-foreground hover:bg-secondary/80 hover:text-foreground"
               }`}
             >
               <tab.icon className={`h-4 w-4 ${activeTab === tab.id ? "text-primary" : "text-muted-foreground/70"}`} />
-              {tab.label}
+              {!sidebarCollapsed && <span>{tab.label}</span>}
             </button>
           ))}
         </nav>
 
         {/* Sidebar Footer Controls */}
-        <div className="p-4 border-t border-border/50 bg-zinc-50/50 dark:bg-zinc-900/20 space-y-4 shrink-0">
-          <div className="flex items-center gap-2">
-            <Label className="text-xs text-muted-foreground w-16">{t("logLevel")}</Label>
-            <Select value={config.log?.level ?? "info"} onValueChange={setLogLevel}>
-              <SelectTrigger className="flex-1 h-8 text-xs bg-white dark:bg-zinc-800">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="trace">Trace</SelectItem>
-                <SelectItem value="debug">Debug</SelectItem>
-                <SelectItem value="info">Info</SelectItem>
-                <SelectItem value="warn">Warn</SelectItem>
-                <SelectItem value="error">Error</SelectItem>
-                <SelectItem value="fatal">Fatal</SelectItem>
-                <SelectItem value="panic">Panic</SelectItem>
-              </SelectContent>
-            </Select>
-          </div>
-
-          <div className="flex items-center pt-2 border-t border-border/50">
-            <div className="flex items-center gap-1.5 text-xs text-muted-foreground bg-white dark:bg-zinc-800 px-2 py-1 rounded-md border shadow-sm">
-              <Server className="h-3 w-3" />
-              <span>{singboxVersion || tc("checking")}</span>
+        <div className={`${sidebarCollapsed ? "p-3" : "p-4 space-y-4"} border-t border-border/50 bg-zinc-50/50 dark:bg-zinc-900/20 shrink-0`}>
+          {sidebarCollapsed ? (
+            <div
+              className="flex h-9 w-9 items-center justify-center rounded-md border bg-white text-muted-foreground shadow-sm dark:bg-zinc-800"
+              title={singboxVersion || tc("checking")}
+            >
+              <Server className="h-4 w-4" />
             </div>
-          </div>
+          ) : (
+            <>
+              <div className="flex items-center gap-2">
+                <Label className="text-xs text-muted-foreground w-16">{t("logLevel")}</Label>
+                <Select value={config.log?.level ?? "info"} onValueChange={setLogLevel}>
+                  <SelectTrigger className="flex-1 h-8 text-xs bg-white dark:bg-zinc-800">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="trace">Trace</SelectItem>
+                    <SelectItem value="debug">Debug</SelectItem>
+                    <SelectItem value="info">Info</SelectItem>
+                    <SelectItem value="warn">Warn</SelectItem>
+                    <SelectItem value="error">Error</SelectItem>
+                    <SelectItem value="fatal">Fatal</SelectItem>
+                    <SelectItem value="panic">Panic</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+
+              <div className="flex items-center pt-2 border-t border-border/50">
+                <div className="flex items-center gap-1.5 text-xs text-muted-foreground bg-white dark:bg-zinc-800 px-2 py-1 rounded-md border shadow-sm">
+                  <Server className="h-3 w-3" />
+                  <span>{singboxVersion || tc("checking")}</span>
+                </div>
+              </div>
+            </>
+          )}
         </div>
       </aside>
 
       {/* Main Content Area */}
       <div className="flex-1 flex flex-col min-w-0 z-10 relative">
         {/* Top Header Action Bar */}
-        <header className="h-16 flex-shrink-0 border-b border-border/50 bg-white/80 dark:bg-zinc-900/80 backdrop-blur-md flex items-center justify-between px-6 z-20">
+        <header className="h-16 flex-shrink-0 border-b border-border/50 bg-white/80 dark:bg-zinc-900/80 backdrop-blur-md flex items-center justify-between gap-4 px-6 z-20">
           {/* Left: Instance Context */}
-          <div className="flex items-center gap-4">
-            <div className="flex items-center gap-3">
+          <div className="flex min-w-0 items-center gap-4">
+            <div className="flex min-w-0 items-center gap-3">
               <Label className="text-sm font-medium text-muted-foreground hidden sm:block">{t("currentInstance")}</Label>
               <Select value={currentInstance || ""} onValueChange={handleInstanceSelect}>
                 <SelectTrigger className="w-[180px] h-9 bg-secondary/30 focus:ring-1">
@@ -480,7 +533,21 @@ export default function Home() {
               <Github className="h-4 w-4" />
             </a>
 
+            <ThemeSwitcher />
+
             <LanguageSwitcher />
+
+            {authEnabled && (
+              <Button
+                variant="ghost"
+                size="icon"
+                className="h-9 w-9 text-muted-foreground hover:text-destructive hover:bg-destructive/10"
+                title={tc("logout")}
+                onClick={logout}
+              >
+                <LogOut className="h-4 w-4" />
+              </Button>
+            )}
           </div>
         </header>
 

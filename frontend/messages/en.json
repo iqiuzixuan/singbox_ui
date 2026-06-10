@@ -47,7 +47,25 @@
     "expand": "Expand",
     "collapse": "Collapse",
     "selectPlaceholder": "Select...",
-    "noResults": "No results"
+    "noResults": "No results",
+    "logout": "Sign out"
+  },
+  "auth": {
+    "title": "Sign in to sing-box UI",
+    "subtitle": "Enter the administrator account to continue managing configs.",
+    "checking": "Checking session...",
+    "signIn": "Sign in",
+    "signingIn": "Signing in...",
+    "missingCredentials": "Enter username and password",
+    "invalidCredentials": "Username or password is incorrect",
+    "loginFailed": "Sign-in failed",
+    "sessionExpired": "Your session expired. Sign in again."
+  },
+  "theme": {
+    "label": "Theme",
+    "system": "Auto",
+    "light": "Light",
+    "dark": "Dark"
   },
   "page": {
     "title": "sing-box Configuration",

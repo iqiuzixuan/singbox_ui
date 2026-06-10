@@ -110,6 +110,10 @@ services:
       - DATA_DIR=/home/data
       - HOST_DATA_DIR=${PWD}/data
       - LISTEN_ADDR=127.0.0.1:7000
+      # Optional: enable username/password sign-in
+      # - AUTH_USERNAME=admin
+      # - AUTH_PASSWORD=change-me
+      # - AUTH_SECRET=replace-with-a-random-secret
       - TZ=Asia/Shanghai
 ```
 
@@ -136,7 +140,7 @@ ssh -L 7000:127.0.0.1:7000 user@your-server
 
 Then visit http://127.0.0.1:7000 in your local browser.
 
-> **Security Note**: Do not change `LISTEN_ADDR` to `0.0.0.0:7000` to expose it publicly — the panel has no authentication. For external access, use SSH tunneling or a reverse proxy with authentication (e.g., Nginx + Basic Auth).
+> **Security Note**: Do not change `LISTEN_ADDR` to `0.0.0.0:7000` to expose it publicly. For external access, set `AUTH_USERNAME` and `AUTH_PASSWORD` to enable sign-in at minimum, and prefer SSH tunneling or an HTTPS reverse proxy.
 
 ---
 
@@ -147,6 +151,10 @@ Then visit http://127.0.0.1:7000 in your local browser.
 | `DATA_DIR` | Data directory inside container | `/home/data` |
 | `HOST_DATA_DIR` | Host data directory (for sing-box container mounts) | `${PWD}/data` |
 | `LISTEN_ADDR` | Server listen address | `127.0.0.1:7000` |
+| `AUTH_USERNAME` | Sign-in username; authentication is enabled when this and `AUTH_PASSWORD` are both set | Empty (auth disabled) |
+| `AUTH_PASSWORD` | Sign-in password; authentication is enabled when this and `AUTH_USERNAME` are both set | Empty (auth disabled) |
+| `AUTH_SECRET` | Session signing secret; use a long random value | Uses `AUTH_PASSWORD` |
+| `AUTH_SESSION_TTL` | Session lifetime using Go duration syntax, such as `24h` or `168h` | `24h` |
 | `TZ` | Timezone | `Asia/Shanghai` |
 
 ---
